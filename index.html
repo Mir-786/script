@@ -225,6 +225,7 @@ body.light-mode .modal-backdrop{background:#18203955}
 </div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
 (() => {
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -413,7 +414,37 @@ let scriptAutosaveTimer=null;
 function queueScriptAutosave(){updateScriptCount();setScriptStatus("Saving draft…");clearTimeout(scriptAutosaveTimer);try{localStorage.setItem(scriptDraftKey(),JSON.stringify({html:getScriptHTML(),updatedAt:new Date().toISOString()}))}catch{}scriptAutosaveTimer=setTimeout(()=>setScriptStatus("Draft auto-saved on this device",true),350)}
 function restoreScriptDraft(work){const key="duodesk-script-draft:"+(work?.id||"new")+":"+(currentName()||"Miraj");try{const draft=JSON.parse(localStorage.getItem(key)||"null");if(draft?.html&&(!work?.script||new Date(draft.updatedAt)>new Date(work.updated||0))){$("#workScript").innerHTML=draft.html;setScriptStatus("Recovered local draft",true)}else setScriptStatus("Auto-save ready")}catch{setScriptStatus("Auto-save ready")}}
 function execScriptCommand(command,value=null){$("#workScript").focus();document.execCommand(command,false,value);queueScriptAutosave()}
-function printScriptAsPDF(){const title=$("#workTitle").value.trim()||"Video Script",hook=$("#workHook").value.trim(),body=getScriptHTML();if(!hook&&!getScriptText().trim()){alert("Write a hook or script first.");return}const w=window.open("","_blank");if(!w){alert("Allow pop-ups to print or save the script as PDF.");return}const hookHtml=hook?'<h2>HOOK / OPENING LINE</h2><p>'+esc(hook).replace(/\n/g,"<br>")+'</p>':'';w.document.write(`<!doctype html><html><head><title>${esc(title)} - Script</title><meta charset="utf-8"><style>body{font:14px/1.7 Arial,sans-serif;color:#222;max-width:800px;margin:40px auto;padding:0 24px}h1{font-size:26px;border-bottom:2px solid #ddd;padding-bottom:12px}h2{font-size:15px;color:#555;margin-top:24px}img{max-width:100%}blockquote{border-left:3px solid #999;padding-left:12px;color:#555}@media print{body{margin:0;max-width:none}}</style></head><body><h1>${esc(title)}</h1>${hookHtml}<h2>VIDEO SCRIPT</h2><article>${body}</article><script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close()}
+async function printScriptAsPDF(){
+ const title=($("#workTitle").value.trim()||"Video Script").replace(/[\\/:*?"<>|]+/g,"-").slice(0,100);
+ const hook=$("#workHook").value.trim(),body=getScriptHTML(),plain=getScriptText().trim();
+ if(!hook&&!plain){alert("Write a hook or script first.");return}
+ const btn=$("#printScriptPdf"),original=btn.innerHTML;
+ const hookHtml=hook?'<h2>HOOK / OPENING LINE</h2><p>'+esc(hook).replace(/\n/g,"<br>")+'</p>':'';
+ const root=document.createElement("div");
+ root.style.cssText="position:fixed;left:-10000px;top:0;width:780px;padding:38px 44px;background:#fff;color:#202124;font:14px/1.7 Arial,sans-serif;z-index:-1;box-sizing:border-box;";
+ root.innerHTML=`<style>#duodesk-pdf-export *{box-sizing:border-box}#duodesk-pdf-export h1{font-size:26px;line-height:1.25;border-bottom:2px solid #ddd;padding-bottom:12px;margin:0 0 22px;overflow-wrap:anywhere}#duodesk-pdf-export h2{font-size:15px;color:#555;margin:24px 0 8px}#duodesk-pdf-export p{margin:0 0 12px}#duodesk-pdf-export img{max-width:100%;height:auto}#duodesk-pdf-export blockquote{border-left:3px solid #999;padding-left:12px;color:#555}#duodesk-pdf-export ul,#duodesk-pdf-export ol{padding-left:26px}</style><h1>${esc(title)}</h1>${hookHtml}<h2>VIDEO SCRIPT</h2><article>${body||""}</article><div style="margin-top:32px;padding-top:10px;border-top:1px solid #ddd;color:#777;font-size:10px">Created with DuoDesk · ${new Date().toLocaleDateString()}</div>`;
+ root.id="duodesk-pdf-export";document.body.appendChild(root);
+ const filename=`${title}-Script.pdf`;
+ try{
+   btn.disabled=true;btn.textContent="Preparing PDF…";
+   if(!window.html2pdf)throw new Error("PDF library is not loaded. Check your internet connection and try again.");
+   const options={margin:[8,8,10,8],filename,image:{type:"jpeg",quality:0.98},html2canvas:{scale:2,useCORS:true,allowTaint:false,backgroundColor:"#ffffff",logging:false},jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},pagebreak:{mode:["css","legacy"],avoid:["img","blockquote","h2"]}};
+   const pdfBlob=await window.html2pdf().set(options).from(root).toPdf().output("blob");
+   let shared=false;
+   if(/Android/i.test(navigator.userAgent)&&navigator.share&&navigator.canShare){
+     try{const file=new File([pdfBlob],filename,{type:"application/pdf"});if(navigator.canShare({files:[file]})){await navigator.share({files:[file],title:filename,text:"DuoDesk video script"});shared=true}}catch(shareError){if(shareError?.name==="AbortError")return;console.warn("PDF share sheet unavailable; trying download",shareError)}
+   }
+   if(!shared){
+     const url=URL.createObjectURL(pdfBlob),a=document.createElement("a");
+     a.href=url;a.download=filename;a.style.display="none";document.body.appendChild(a);a.click();a.remove();
+     setTimeout(()=>URL.revokeObjectURL(url),60000);
+     alert("PDF created. If the download does not start inside your APK, the Android WebView must enable file downloads (DownloadListener) or native PDF sharing.");
+   }
+ }catch(err){
+   console.error("DuoDesk PDF export failed:",err);
+   alert("Could not create the PDF. Please check your internet connection and try again. Details: "+(err?.message||"Unknown error"));
+ }finally{root.remove();btn.disabled=false;btn.innerHTML=original;icons()}
+}
 async function manualSaveScript(){const id=$("#workId").value,existing=works.find(w=>String(w.id)===String(id));try{localStorage.setItem(scriptDraftKey(),JSON.stringify({html:getScriptHTML(),updatedAt:new Date().toISOString()}));if(existing){await saveWorkData({...existing,script:getScriptHTML(),updated:new Date().toISOString(),remote:!!existing.remote});setScriptStatus("Script saved to workspace",true)}else{setScriptStatus("Draft saved on this device · click Save work to create the item",true)}}catch(e){setScriptStatus("Save failed — draft remains on this device");alert("Could not save the script to the workspace: "+e.message)}}
 function fileAsDataURL(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.onerror=reject;r.readAsDataURL(file)})}
 async function uploadOrKeepImage(file,id){
