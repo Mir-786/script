@@ -423,7 +423,7 @@ async function printScriptAsPDF(){
  let pdfWindow=null;try{pdfWindow=window.open("about:blank","_blank")}catch{}
  const hookHtml=hook?'<h2>HOOK / OPENING LINE</h2><p>'+esc(hook).replace(/\n/g,"<br>")+'</p>':'';
  const root=document.createElement("div");
- root.style.cssText="position:fixed;left:-10000px;top:0;width:780px;padding:38px 44px;background:#fff;color:#202124;font:14px/1.7 Arial,sans-serif;z-index:-1;box-sizing:border-box;";
+ root.style.cssText="position:fixed;left:0;top:0;width:min(780px,100vw);min-height:100vh;padding:38px 44px;background:#fff;color:#202124;font:14px/1.7 Arial,sans-serif;z-index:2147483000;box-sizing:border-box;overflow-wrap:anywhere;overflow:auto;";
  root.innerHTML=`<style>#duodesk-pdf-export *{box-sizing:border-box}#duodesk-pdf-export h1{font-size:26px;line-height:1.25;border-bottom:2px solid #ddd;padding-bottom:12px;margin:0 0 22px;overflow-wrap:anywhere}#duodesk-pdf-export h2{font-size:15px;color:#555;margin:24px 0 8px}#duodesk-pdf-export p{margin:0 0 12px}#duodesk-pdf-export img{max-width:100%;height:auto}#duodesk-pdf-export blockquote{border-left:3px solid #999;padding-left:12px;color:#555}#duodesk-pdf-export ul,#duodesk-pdf-export ol{padding-left:26px}</style><h1>${esc(title)}</h1>${hookHtml}<h2>VIDEO SCRIPT</h2><article>${body||""}</article><div style="margin-top:32px;padding-top:10px;border-top:1px solid #ddd;color:#777;font-size:10px">Created with DuoDesk · ${new Date().toLocaleDateString()}</div>`;
  root.id="duodesk-pdf-export";document.body.appendChild(root);
  const filename=`${title}-Script.pdf`;
@@ -431,9 +431,14 @@ async function printScriptAsPDF(){
    btn.disabled=true;btn.textContent="Preparing PDF…";
    if(!window.html2pdf)throw new Error("PDF library is not loaded. Check your internet connection and try again.");
    const options={margin:[8,8,10,8],filename,image:{type:"jpeg",quality:0.98},html2canvas:{scale:2,useCORS:true,allowTaint:false,backgroundColor:"#ffffff",logging:false},jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},pagebreak:{mode:["css","legacy"],avoid:["img","blockquote","h2"]}};
-   const pdfBlob=await window.html2pdf().set(options).from(root).toPdf().output("blob");
+   // html2canvas can capture a blank canvas when its source is positioned far outside the viewport.
+   // Keep the export sheet in the viewport and let layout/paint finish before rasterizing it.
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+   const worker=window.html2pdf().set(options).from(root).toPdf();
+   const pdfBlob=await worker.outputPdf("blob");
+   if(!(pdfBlob instanceof Blob)||pdfBlob.size<1000)throw new Error("The PDF was empty. Please wait a moment and try again.");
    const url=URL.createObjectURL(pdfBlob);
-   // Open the PDF for viewing/printing instead of forcing a file download.
+   // Open the generated PDF so the user can choose Print from the viewer.
    if(pdfWindow&&!pdfWindow.closed){
      pdfWindow.document.title=filename;
      pdfWindow.location.replace(url);
